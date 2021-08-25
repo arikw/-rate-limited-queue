@@ -4,20 +4,25 @@ function createQueue(slidingWindowInterval, maxTasksInSlidingWindow, maxConcurre
 
   let runningTasks = 0;
 
-  function enqueue(tasks) {
-    tasks = Array.isArray(tasks) ? tasks : [ tasks ];
-    for (const task of tasks) {
-      if (typeof task !== 'function') {
+  function enqueue(taskHandlers) {
+    taskHandlers = Array.isArray(taskHandlers) ? taskHandlers : [ taskHandlers ];
+    const newTasks = [];
+    for (const handler of taskHandlers) {
+      if (typeof handler !== 'function') {
         throw 'Task must be a function';
       }
-      q.push({
-        handler: async () => task(),
-        queuedAt: Date.now(),
-        startedAt: -1
-      });
+      const newTask = {
+        handler: handler,
+        startedAt: -1,
+        promise: undefined
+      };
+      q.push(newTask);
+      newTasks.push(newTask);
     }
 
     runNextTaskIfPossible();
+
+    return promiseAll(newTasks, q);
   }
 
   enqueue.stats = () => ({
@@ -40,19 +45,49 @@ function createQueue(slidingWindowInterval, maxTasksInSlidingWindow, maxConcurre
       const nextTask = q.find(task => (task.startedAt === -1));
 
       if (nextTask) {
-        nextTask.startedAt = Date.now();
+
         ++runningTasks;
-        const promise = nextTask.handler();
+        nextTask.startedAt = Date.now();
+
+        const promise = Promise.resolve(nextTask.handler()).catch(e => e);
         promise.finally(() => {
-          q.splice(q.indexOf(nextTask), 1);
           --runningTasks;
+          q.splice(q.indexOf(nextTask), 1); // remove the task
           runNextTaskIfPossible();
         });
+        nextTask.promise = promise;
         runNextTaskIfPossible();
       }
     }
   }
+
   return enqueue;
+}
+
+function promiseAll(newTasks, q) {
+
+  const startedTasks = q.filter(t => !!t.promise);
+  let pendingTasks = q.filter(t => !t.promise);
+
+  return new Promise((resolve, reject) => {
+
+    const onSetteled = () => {
+      const startedTasks = pendingTasks.filter(t => !!t.promise);
+      pendingTasks = pendingTasks.filter(t => !t.promise);
+
+      if (pendingTasks.length === 0) {
+        return Promise.all(newTasks.map(t => t.promise)).then(resolve).catch(reject);
+      }
+
+      for (const task of startedTasks) {
+        task.promise.finally(onSetteled);
+      }
+    };
+
+    for (const task of startedTasks) {
+      task.promise.finally(onSetteled);
+    }
+  });
 }
 
 module.exports = createQueue;

@@ -7,12 +7,28 @@ function getTasks(numOfItems, timeout) {
     .map(task => () => new Promise(resolve => {
       task.started = true;
       setTimeout(() => {
-        resolve(task.tasks);
+        resolve(task.taskName);
       }, timeout);
     }));
 }
 
-describe('rate-limited-queue', () => {
+describe('createQueue()', () => {
+
+  it('should create a queue', () => {
+    const queue = createQueue(Infinity, Infinity);
+    expect(typeof queue).to.equal('function');
+  });
+
+});
+
+describe('queue()', () => {
+
+  it('should return a promise', () => {
+    const queue = createQueue(Infinity, Infinity);
+    const value = queue(() => {});
+    expect(typeof value.then).to.equal('function');
+    expect(typeof value.catch).to.equal('function');
+  });
 
   it('should run all tasks when sliding window is large enough', () => {
     const queue = createQueue(Infinity, Infinity);
@@ -70,13 +86,13 @@ describe('rate-limited-queue', () => {
 
   });
 
-  it('rejects non-functions in the queue', () => {
+  it('should reject non-functions in the queue', () => {
     const queue = createQueue(Infinity, Infinity);
     expect(() => queue(['123'])).to.throw('Task must be a function');
     expect(() => queue('123')).to.throw('Task must be a function');
   });
 
-  it('should except array passed to the queue function', (done) => {
+  it('should accept array passed to the queue function', (done) => {
     const queue = createQueue(Infinity, Infinity);
     expect(() => queue([() => {
       expect(true).to.be.true;
@@ -84,7 +100,7 @@ describe('rate-limited-queue', () => {
     }])).to.not.throw();
   });
 
-  it('should except a single task passed to the queue function', (done) => {
+  it('should accept a single task passed to the queue function', (done) => {
     const queue = createQueue(Infinity, Infinity);
     expect(() => queue(() => {
       expect(true).to.be.true;
@@ -92,13 +108,39 @@ describe('rate-limited-queue', () => {
     })).to.not.throw();
   });
 
-  it('should run tasks queued subsequently', (done) => {
+  it('should run tasks queued using multiple queue() calls', async () => {
     const queue = createQueue(Infinity, Infinity);
-    queue(() => {});
+    const results = [];
+    queue(() => results.push('a'));
+    queue(() => results.push('b'));
+    await queue(() => results.push('c'));
+    expect(JSON.stringify(results)).to.equal('["a","b","c"]');
+  });
 
-    queue(() => {
-      done();
-    });
+  it('should resolve a promise when all tasks have finished', async () => {
+    const queue = createQueue(50, 2);
+
+    const singleResolvedTask = await queue(() => new Promise(resolve => setTimeout(() => resolve('a'), 80)));
+    expect(JSON.stringify(singleResolvedTask)).to.equal('["a"]');
+
+    const multipleResolved = await queue(getTasks(2, 40));
+
+    expect(JSON.stringify(multipleResolved)).to.equal('["t1","t2"]');
+  });
+
+  it('should reject a promise when a task has been rejected', async () => {
+    const queue = createQueue(50, 2);
+
+    const singleResolvedTask = await queue(() => new Promise((_, reject) => setTimeout(() => reject('rejection a'), 80))).catch(() => 'rejected');
+    expect(singleResolvedTask[0]).to.equal('rejection a');
+
+    const multipleResolved = await queue([
+      () => new Promise((_, reject) => setTimeout(() => reject('rejection b'), 40)),
+      () => new Promise((_, reject) => setTimeout(() => reject('rejection c'), 40))
+    ]).catch(() => 'rejected');
+
+    expect(multipleResolved[0]).to.equal('rejection b');
+    expect(multipleResolved[1]).to.equal('rejection c');
   });
 });
 
