@@ -5,6 +5,11 @@ function createQueue(slidingWindowInterval, maxTasksInSlidingWindow, maxConcurre
   let runningTasks = 0;
 
   function enqueue(taskHandlers) {
+
+    if (([].concat(taskHandlers)).length === 0) {
+      return Promise.resolve([]);
+    }
+
     taskHandlers = Array.isArray(taskHandlers) ? taskHandlers : [ taskHandlers ];
     const newTasks = [];
     for (const handler of taskHandlers) {
@@ -22,12 +27,18 @@ function createQueue(slidingWindowInterval, maxTasksInSlidingWindow, maxConcurre
 
     runNextTaskIfPossible();
 
-    return promiseAll(newTasks, q);
+    const promise = promiseAll(newTasks);
+    promise.finally(() => {
+      if ((runningTasks === 0) && (pendingTasks().length === 0)) {
+        q.splice(0, q.length);
+      }
+    });
+    return promise;
   }
 
-  enqueue.stats = () => ({
-    runningTasks
-  });
+  function pendingTasks() {
+    return q.filter(task => (task.startedAt === -1));
+  }
 
   function runNextTaskIfPossible() {
     if (runningTasks >= maxConcurrent) {
@@ -41,12 +52,8 @@ function createQueue(slidingWindowInterval, maxTasksInSlidingWindow, maxConcurre
 
     const availableSlotsInSlidingWindow = maxTasksInSlidingWindow - tasksInSlidingWindow.length;
 
-    const nextTask = q.find(task => (task.startedAt === -1));
+    const nextTask = pendingTasks()[0];
     if (!nextTask) {
-      // empty tasks list
-      process.nextTick(() => { // give back control before cleaning
-        q.splice(0, q.length);
-      });
       return;
     }
 
@@ -54,12 +61,12 @@ function createQueue(slidingWindowInterval, maxTasksInSlidingWindow, maxConcurre
       ++runningTasks;
       nextTask.startedAt = Date.now();
 
-      const promise = Promise.resolve(nextTask.handler()).catch(e => e);
-      promise.finally(() => {
-        --runningTasks;
-        runNextTaskIfPossible();
-      });
-      nextTask.promise = promise;
+      nextTask.promise = Promise.resolve(nextTask.handler())
+        .catch(e => e)
+        .finally(() => {
+          --runningTasks;
+          runNextTaskIfPossible();
+        });
     }
 
     if (availableSlotsInSlidingWindow > 0) {
@@ -70,13 +77,20 @@ function createQueue(slidingWindowInterval, maxTasksInSlidingWindow, maxConcurre
     }
   }
 
+  if (process.env.NODE_ENV === 'TEST') {
+    enqueue.internals = () => ({
+      q,
+      runningTasks
+    });
+  }
+
   return enqueue;
 }
 
-function promiseAll(newTasks, q) {
+function promiseAll(newTasks) {
 
-  const startedTasks = q.filter(t => !!t.promise);
-  let pendingTasks = q.filter(t => !t.promise);
+  const startedTasks = newTasks.filter(t => !!t.promise);
+  let pendingTasks = newTasks.filter(t => !t.promise);
 
   return new Promise((resolve, reject) => {
 
@@ -89,11 +103,24 @@ function promiseAll(newTasks, q) {
       }
 
       for (const task of startedTasks) {
+        task.includedInQueuePromise = true;
         task.promise.finally(onSetteled);
       }
     };
 
-    for (const task of startedTasks) {
+    if (startedTasks.length === 0) {
+      const firstTaskInBatch = newTasks[0];
+      const originalHandler = firstTaskInBatch.handler;
+      firstTaskInBatch.handler = () => new Promise((resolve, reject) => {
+        firstTaskInBatch.includedInQueuePromise = true;
+        Promise.resolve(originalHandler()).then(resolve).catch(reject).finally(onSetteled);
+      });
+      return;
+    }
+
+    const startedTasksWithoutFinalHandler = startedTasks.filter(task => !task.includedInQueuePromise);
+    for (const task of startedTasksWithoutFinalHandler) {
+      task.includedInQueuePromise = true;
       task.promise.finally(onSetteled);
     }
   });

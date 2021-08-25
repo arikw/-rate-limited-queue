@@ -2,6 +2,8 @@ const
   expect = require('chai').expect,
   createQueue = require('../index');
 
+process.env.NODE_ENV = 'TEST';
+
 function getTasks(numOfItems, timeout) {
   return [...Array(numOfItems).keys()].map(i => ({ taskName: `t${i + 1}` }))
     .map(task => () => new Promise(resolve => {
@@ -15,7 +17,7 @@ function getTasks(numOfItems, timeout) {
 describe('createQueue()', () => {
 
   it('should create a queue', () => {
-    const queue = createQueue(Infinity, Infinity);
+    const queue = createQueue(1000, Infinity);
     expect(typeof queue).to.equal('function');
   });
 
@@ -24,26 +26,41 @@ describe('createQueue()', () => {
 describe('queue()', () => {
 
   it('should return a promise', () => {
-    const queue = createQueue(Infinity, Infinity);
+    const queue = createQueue(1000, Infinity);
     const value = queue(() => {});
     expect(typeof value.then).to.equal('function');
     expect(typeof value.catch).to.equal('function');
   });
 
-  it('should resolve the promise upon task completion', async () => {
-    const queue = createQueue(Infinity, Infinity);
-    const value = await queue(() => 'completed');
-    expect(value[0]).to.equal('completed');
+  it('should resolve the promise upon an immediate task completion', async () => {
+    const queue = createQueue(120, 1);
+    queue(() => new Promise(resolve => setTimeout(() => resolve('completed1'), 100)));
+    const value = await queue(() => 'completed2');
+    expect(value[0]).to.equal('completed2');
+  });
+
+  it('should resolve the promise upon a delayed task completion', async () => {
+    const queue = createQueue(120, 1);
+    queue(() => new Promise(resolve => setTimeout(() => resolve('completed1'), 100)));
+    const value = await queue(() => 'completed2');
+    expect(value[0]).to.equal('completed2');
+  });
+
+  it('should clear the queue when all tasks are done', async () => {
+    const queue = createQueue(120, 1);
+    queue(() => new Promise(resolve => setTimeout(() => resolve('completed1'), 100)));
+    await queue(() => 'completed2');
+    expect(queue.internals().q.length).to.equal(0);
   });
 
   it('should run all tasks when sliding window is large enough', () => {
-    const queue = createQueue(Infinity, Infinity);
+    const queue = createQueue(1000, Infinity);
 
     const tasks = getTasks(10, 100);
     queue(tasks);
 
     process.nextTick(() => {
-      expect(queue.stats().runningTasks).to.equal(tasks.length);
+      expect(queue.internals().runningTasks).to.equal(tasks.length);
     });
 
   });
@@ -53,7 +70,7 @@ describe('queue()', () => {
     const queue1 = createQueue(10, 3);
     queue1(getTasks(10, 55));
     process.nextTick(() => {
-      expect(queue1.stats().runningTasks).to.equal(3);
+      expect(queue1.internals().runningTasks).to.equal(3);
     });
 
     const queue2 = createQueue(10/*ms*/, 1);
@@ -61,7 +78,7 @@ describe('queue()', () => {
       ...getTasks(3, 10/*ms*/), // some tasks
       () => new Promise(resolve => { // an extra task
         setTimeout(() => {
-          expect(queue2.stats().runningTasks).to.equal(1);
+          expect(queue2.internals().runningTasks).to.equal(1);
           done();
           resolve();
         }, 10/*ms*/);
@@ -75,7 +92,7 @@ describe('queue()', () => {
     const queue1 = createQueue(10, Infinity, 3);
     queue1(getTasks(10, 55/*ms*/));
     process.nextTick(() => {
-      expect(queue1.stats().runningTasks).to.equal(3);
+      expect(queue1.internals().runningTasks).to.equal(3);
     });
 
     const queue2 = createQueue(10/*ms*/, Infinity, 1);
@@ -83,7 +100,7 @@ describe('queue()', () => {
       ...getTasks(3, 10/*ms*/), // some tasks
       () => new Promise(resolve => { // an extra task
         setTimeout(() => {
-          expect(queue2.stats().runningTasks).to.equal(1);
+          expect(queue2.internals().runningTasks).to.equal(1);
           done();
           resolve();
         }, 10/*ms*/);
@@ -93,13 +110,13 @@ describe('queue()', () => {
   });
 
   it('should reject non-functions in the queue', () => {
-    const queue = createQueue(Infinity, Infinity);
+    const queue = createQueue(1000, Infinity);
     expect(() => queue(['123'])).to.throw('Task must be a function');
     expect(() => queue('123')).to.throw('Task must be a function');
   });
 
   it('should accept array passed to the queue function', (done) => {
-    const queue = createQueue(Infinity, Infinity);
+    const queue = createQueue(1000, Infinity);
     expect(() => queue([() => {
       expect(true).to.be.true;
       done();
@@ -107,7 +124,7 @@ describe('queue()', () => {
   });
 
   it('should accept a single task passed to the queue function', (done) => {
-    const queue = createQueue(Infinity, Infinity);
+    const queue = createQueue(1000, Infinity);
     expect(() => queue(() => {
       expect(true).to.be.true;
       done();
@@ -115,7 +132,7 @@ describe('queue()', () => {
   });
 
   it('should run tasks queued using multiple queue() calls', async () => {
-    const queue = createQueue(Infinity, Infinity);
+    const queue = createQueue(1000, Infinity);
     const results = [];
     queue(() => results.push('a'));
     queue(() => results.push('b'));
