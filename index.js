@@ -25,9 +25,10 @@ function createQueue(slidingWindowInterval, maxTasksInSlidingWindow, maxConcurre
       newTasks.push(newTask);
     }
 
+    const promise = promiseAll(newTasks);
+
     runNextTaskIfPossible();
 
-    const promise = promiseAll(newTasks);
     promise.finally(() => {
       if ((runningTasks === 0) && (pendingTasks().length === 0)) {
         q.splice(0, q.length);
@@ -60,7 +61,6 @@ function createQueue(slidingWindowInterval, maxTasksInSlidingWindow, maxConcurre
     function runNextTask() {
       ++runningTasks;
       nextTask.startedAt = Date.now();
-
       nextTask.promise = Promise.resolve(nextTask.handler())
         .catch(e => e)
         .finally(() => {
@@ -72,7 +72,7 @@ function createQueue(slidingWindowInterval, maxTasksInSlidingWindow, maxConcurre
     if (availableSlotsInSlidingWindow > 0) {
       runNextTask();
       runNextTaskIfPossible();
-    } else if (runningTasks === 0) {
+    } else {
       setTimeout(runNextTaskIfPossible, slidingWindowInterval - (Date.now() - tasksInSlidingWindow[0].startedAt) + 1);
     }
   }
@@ -89,39 +89,27 @@ function createQueue(slidingWindowInterval, maxTasksInSlidingWindow, maxConcurre
 
 function promiseAll(newTasks) {
 
-  const startedTasks = newTasks.filter(t => !!t.promise);
-  let pendingTasks = newTasks.filter(t => !t.promise);
+  let batchPromiseCreated = false;
 
-  return new Promise((resolve, reject) => {
+  return new Promise((batchResolve, batchReject) => {
 
-    const onSetteled = () => {
-      const startedTasks = pendingTasks.filter(t => !!t.promise);
-      pendingTasks = pendingTasks.filter(t => !t.promise);
-
-      if (pendingTasks.length === 0) {
-        return Promise.all(newTasks.map(t => t.promise)).then(resolve).catch(reject);
-      }
-
-      for (const task of startedTasks) {
-        task.includedInQueuePromise = true;
-        task.promise.finally(onSetteled);
-      }
-    };
-
-    if (startedTasks.length === 0) {
-      const firstTaskInBatch = newTasks[0];
-      const originalHandler = firstTaskInBatch.handler;
-      firstTaskInBatch.handler = () => new Promise((resolve, reject) => {
-        firstTaskInBatch.includedInQueuePromise = true;
-        Promise.resolve(originalHandler()).then(resolve).catch(reject).finally(onSetteled);
+    for (const task of newTasks) {
+      const originalHandler = task.handler;
+      task.handler = () => new Promise((resolve, reject) => {
+        Promise.resolve(originalHandler())
+          .then(resolve)
+          .catch(reject)
+          .finally(() => {
+            if (batchPromiseCreated) {
+              return;
+            }
+            const pendingTasks = newTasks.filter(t => !t.promise);
+            if (pendingTasks.length === 0) {
+              batchPromiseCreated = true;
+              return Promise.all(newTasks.map(t => t.promise)).then(batchResolve).catch(batchReject);
+            }
+          });
       });
-      return;
-    }
-
-    const startedTasksWithoutFinalHandler = startedTasks.filter(task => !task.includedInQueuePromise);
-    for (const task of startedTasksWithoutFinalHandler) {
-      task.includedInQueuePromise = true;
-      task.promise.finally(onSetteled);
     }
   });
 }

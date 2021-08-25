@@ -32,18 +32,27 @@ describe('queue()', () => {
     expect(typeof value.catch).to.equal('function');
   });
 
-  it('should resolve the promise upon an immediate task completion', async () => {
+  it('should resolve the promise upon of queue() after a queue() with an immediate task completion', async () => {
     const queue = createQueue(120, 1);
     queue(() => new Promise(resolve => setTimeout(() => resolve('completed1'), 100)));
     const value = await queue(() => 'completed2');
     expect(value[0]).to.equal('completed2');
   });
 
-  it('should resolve the promise upon a delayed task completion', async () => {
+  it('should resolve the promise upon of queue() after a queue() with a delayed task completion', async () => {
     const queue = createQueue(120, 1);
     queue(() => new Promise(resolve => setTimeout(() => resolve('completed1'), 100)));
     const value = await queue(() => 'completed2');
     expect(value[0]).to.equal('completed2');
+  });
+
+  it('should resolve the promise if not all tasks queued fit the sliding window', async () => {
+    const queue = createQueue(50, 1);
+    const value = await queue([
+      () => new Promise(resolve => setTimeout(() => resolve('completed1'), 10)),
+      () => 'completed2'
+    ]);
+    expect(value[1]).to.equal('completed2');
   });
 
   it('should clear the queue when all tasks are done', async () => {
