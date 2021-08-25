@@ -40,24 +40,31 @@ function createQueue(slidingWindowInterval, maxTasksInSlidingWindow, maxConcurre
     );
 
     const availableSlotsInSlidingWindow = maxTasksInSlidingWindow - tasksInSlidingWindow.length;
-    if (availableSlotsInSlidingWindow > 0) {
 
-      const nextTask = q.find(task => (task.startedAt === -1));
+    const nextTask = q.find(task => (task.startedAt === -1));
+    if (!nextTask) {
+      // empty tasks list
+      q.splice(0, q.length);
+      return;
+    }
 
-      if (nextTask) {
+    function runNextTask() {
+      ++runningTasks;
+      nextTask.startedAt = Date.now();
 
-        ++runningTasks;
-        nextTask.startedAt = Date.now();
-
-        const promise = Promise.resolve(nextTask.handler()).catch(e => e);
-        promise.finally(() => {
-          --runningTasks;
-          q.splice(q.indexOf(nextTask), 1); // remove the task
-          runNextTaskIfPossible();
-        });
-        nextTask.promise = promise;
+      const promise = Promise.resolve(nextTask.handler()).catch(e => e);
+      promise.finally(() => {
+        --runningTasks;
         runNextTaskIfPossible();
-      }
+      });
+      nextTask.promise = promise;
+      runNextTaskIfPossible();
+    }
+
+    if (availableSlotsInSlidingWindow > 0) {
+      runNextTask();
+    } else if (runningTasks === 0) {
+      setTimeout(runNextTaskIfPossible, slidingWindowInterval - (Date.now() - tasksInSlidingWindow[0].startedAt));
     }
   }
 

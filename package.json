@@ -1,6 +1,6 @@
 {
   "name": "rate-limited-queue",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "author": "Arik W",
   "license": "MIT",
   "description": "Queue tasks and throttle their execution",

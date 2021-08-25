@@ -6,6 +6,7 @@ function getTasks(numOfItems, timeout) {
   return [...Array(numOfItems).keys()].map(i => ({ taskName: `t${i + 1}` }))
     .map(task => () => new Promise(resolve => {
       task.started = true;
+      console.log(task.taskName, Date.now() - start);
       setTimeout(() => {
         resolve(task.taskName);
       }, timeout);
