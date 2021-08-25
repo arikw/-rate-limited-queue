@@ -6,7 +6,6 @@ function getTasks(numOfItems, timeout) {
   return [...Array(numOfItems).keys()].map(i => ({ taskName: `t${i + 1}` }))
     .map(task => () => new Promise(resolve => {
       task.started = true;
-      console.log(task.taskName, Date.now() - start);
       setTimeout(() => {
         resolve(task.taskName);
       }, timeout);
@@ -29,6 +28,12 @@ describe('queue()', () => {
     const value = queue(() => {});
     expect(typeof value.then).to.equal('function');
     expect(typeof value.catch).to.equal('function');
+  });
+
+  it('should resolve the promise upon task completion', async () => {
+    const queue = createQueue(Infinity, Infinity);
+    const value = await queue(() => 'completed');
+    expect(value[0]).to.equal('completed');
   });
 
   it('should run all tasks when sliding window is large enough', () => {

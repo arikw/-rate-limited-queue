@@ -44,7 +44,9 @@ function createQueue(slidingWindowInterval, maxTasksInSlidingWindow, maxConcurre
     const nextTask = q.find(task => (task.startedAt === -1));
     if (!nextTask) {
       // empty tasks list
-      q.splice(0, q.length);
+      process.nextTick(() => { // give back control before cleaning
+        q.splice(0, q.length);
+      });
       return;
     }
 
@@ -58,13 +60,13 @@ function createQueue(slidingWindowInterval, maxTasksInSlidingWindow, maxConcurre
         runNextTaskIfPossible();
       });
       nextTask.promise = promise;
-      runNextTaskIfPossible();
     }
 
     if (availableSlotsInSlidingWindow > 0) {
       runNextTask();
+      runNextTaskIfPossible();
     } else if (runningTasks === 0) {
-      setTimeout(runNextTaskIfPossible, slidingWindowInterval - (Date.now() - tasksInSlidingWindow[0].startedAt));
+      setTimeout(runNextTaskIfPossible, slidingWindowInterval - (Date.now() - tasksInSlidingWindow[0].startedAt) + 1);
     }
   }
 
